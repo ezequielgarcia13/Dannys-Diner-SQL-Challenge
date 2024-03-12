@@ -160,4 +160,190 @@ WHERE top = 1;
 - Mediante **RANK** y **OVER** se obtiene un ranking de productos ordenados particionado por cada cliente.
 - Extraer datos de la **CTE** cuyo ranking = 1, de esta manera se obtiene el producto más popular para cada cliente.
 
+#### Resultados:
+
+| customer_id  | product_name | orders | 
+| ------------- | ------------- | ------------- |
+| A  | ramen  | 3 |
+| B  | curry | 2 |
+| B  | sushi  | 2 |
+| B  | ramen  | 2 |
+| C  | ramen  | 3 |
+
+### 6. ¿Qué artículo compró primero el cliente después de convertirse en miembro?
+
+```sql
+WITH product_member AS(
+	SELECT 
+		sales.customer_id,
+		product_name,
+		order_date,
+		join_date,
+		TIMEDIFF(order_date, join_date) AS time_diff,
+		RANK()
+		OVER(PARTITION BY sales.customer_id ORDER BY TIMEDIFF(order_date, join_date) ASC) AS ranking
+	FROM sales 
+	INNER JOIN members
+	ON sales.customer_id = members.customer_id
+	INNER JOIN menu
+	ON sales.product_id = menu.product_id
+	WHERE timediff(order_date, join_date) > 0
+    )
+SELECT 
+	customer_id,
+    product_name
+FROM product_member
+WHERE ranking = 1;
+```
+
+#### Pasos:
+
+- Crear consulta uniendo tablas sales, menu y members con función **JOIN** que devuelve: cliente, producto, fecha de orden, fecha que el cliente se convirtió en miembro.
+- Agregar mediante la función **TIMEDIFF** una columna que indica el tiempo transcurrido desde que el cliente se convirtió en miembro hasta que ordeno un producto.
+- Con la cláusula **WHERE** se filtran los resultados para obtener únicamente aquellas ordenes que se hicieron luego de que el cliente se convirtió en miembro.
+- Usar **RANK** **OVER** para clasificar las ordenes de los clientes luego de convertirse en miembros siendo 1 la primer orden.
+- Agregar consulta adicional que extraiga datos de la CTE antes mencionada pero filtrando los resultados y obteniendo unicamente aquellos que contengan ranking = 1, es decir, el producto que se ordeno primero luego de convertirse en miembro.
+
+#### Resultados:
+
+| customer_id  | product_name |
+| ------------- | ------------- |
+| A  | ramen |
+| B  | sushi  | 
+
+ ### 7. ¿Qué artículo se compró justo antes de que el cliente se convirtiera en miembro?
+
+```sql
+WITH product_member_bf AS(
+	SELECT 
+		sales.customer_id,
+		product_name,
+		order_date,
+		join_date,
+		TIMEDIFF(order_date, join_date) AS time_diff,
+		RANK()
+		OVER(PARTITION BY sales.customer_id ORDER BY TIMEDIFF(order_date, join_date) DESC) AS ranking
+	FROM sales 
+	INNER JOIN members
+	ON sales.customer_id = members.customer_id
+	INNER JOIN menu
+	ON sales.product_id = menu.product_id
+	WHERE timediff(order_date, join_date) <= 0
+    )
+SELECT 
+	customer_id,
+    product_name
+FROM product_member_bf
+WHERE ranking = 1;
+```
+
+#### Pasos:
+
+- Crear consulta uniendo tablas sales, menu y members con función **JOIN** que devuelve: cliente, producto, fecha de orden, fecha que el cliente se convirtió en miembro.
+- Agregar mediante la función **TIMEDIFF** una columna que indica el tiempo transcurrido desde que el cliente se convirtió en miembro hasta que ordeno un producto, en este caso, la columna devuelve valores negativos ya que necesitamos el producto que ordenó antes de convertirse en miembro.
+- Con la cláusula **WHERE** se filtran los resultados para obtener únicamente aquellas ordenes que se hicieron antes de que el cliente se convierta en miembro.
+- Usar **RANK** **OVER** para clasificar las ordenes de los clientes antes de convertirse en miembros siendo 1 la última orden.
+- Agregar consulta adicional que extraiga datos de la CTE antes mencionada pero filtrando los resultados y obteniendo unicamente aquellos que contengan ranking = 1, es decir, el producto que se ordeno último, antes de convertirse en miembro.
+
+#### Resultados:
+
+| customer_id  | product_name |
+| ------------- | ------------- |
+| A  | curry |
+| B  | sushi  | 
+
+### 8. ¿Cuál es el total de artículos y la cantidad gastada por cada miembro antes de convertirse en miembro?
+
+```sql
+SELECT 
+	sales.customer_id,
+    COUNT(order_date) AS orders,
+    SUM(price) AS total
+FROM sales 
+	INNER JOIN members
+	ON sales.customer_id = members.customer_id
+	INNER JOIN menu
+	ON sales.product_id = menu.product_id
+WHERE timediff(order_date, join_date) < 0
+GROUP BY customer_id;
+```
+
+#### Pasos: 
+
+- Unir tablas members, sales y menu con función **JOIN**.
+- Extraer id de cliente, cantidad de ordenes con función **COUNT** y suma del precio de cada orden con función **SUM**.
+- Usar **TIMEDIFF** < 0 en cláusula **WHERE** para obtener solo resultados de órdenes que fueron hechas antes de que el cliente se convierta en miembro.
+- Agrupar resultados por cada cliente con función **GROUP BY**.
+
+#### Resultados:
+
+| customer_id  | orders | total | 
+| ------------- | ------------- | ------------- |
+| B | 3  | 40 |
+| A | 2 | 25 |
+
+ ### 9. Si cada dólar gastado equivale a 10 puntos y el sushi tiene un multiplicador de puntos x2, ¿cuántos puntos tendría cada cliente?
+
+ ```sql
+SELECT 
+	sales.customer_id,
+    SUM(IF(product_name = 'sushi', price*20, price*10)) AS points
+FROM sales 
+	INNER JOIN members
+	ON sales.customer_id = members.customer_id
+	INNER JOIN menu
+	ON sales.product_id = menu.product_id
+GROUP BY sales.customer_id;
+```
+
+#### Pasos:
+
+- Unir tablas members, sales y menu con función **JOIN**.
+- Para obtener puntaje, usar **IF** dentro de función **SUM** donde se indica que si el producto es "sushi" debe multiplicar por 20 y sino por 10.
+- Agrupar resultados por cliente con función **GROUP BY**.
+
+#### Resultados:
+
+| customer_id  | points |
+| ------------- | ------------- |
+| B  | 940 |
+| A  | 860  | 
+
+### 10. En la primera semana después de que un cliente se une al programa (incluida su fecha de inscripción), gana el doble de puntos en todos los artículos, no solo en sushi. ¿Cuántos puntos tienen los clientes A y B a finales de enero?
+
+ ```sql
+SELECT 
+	sales.customer_id,
+	SUM(CASE 
+			WHEN product_name = 'sushi' THEN price * 20
+			WHEN order_date BETWEEN join_date AND DATE_ADD(order_date, INTERVAL 6 DAY)
+			THEN price * 20
+            ELSE price * 10 
+	END) AS points
+FROM sales
+INNER JOIN members 
+ON sales.customer_id = members.customer_id
+INNER JOIN menu
+ON sales.product_id = menu.product_id
+WHERE EXTRACT(MONTH FROM order_date) = 01
+GROUP BY sales.customer_id;
+```
+
+#### Pasos:
+
+- Unir tablas members, sales y menu con función **JOIN**.
+- Para obtener puntaje, usar **CASE** junto con **WHEN** para indicar que si el producto es "sushi" se multiplica el precio por 20 y si la orden fue hecha la semana siguiente a la fecha en que el cliente se convirtió en miembro también se debe multiplicar el precio por 20. Ésto últmo, lo logramos con las funciones **Between** y **DATE_ADD** para indicar un intervalo de tiempo de una semana. En caso de que el producto no sea "sushi" ni la orden haya sido hecha en la semana mencionada, el puntaje será el precio del producto multiplicado por 10.
+- Filtrar resultados solo de ordenes hechas en enero con la función **EXTRACT** indicandole qué el mes debe ser = 1.
+- Agrupar resultados por cliente con función **GROUP BY**.
+
+#### Resultados:
+
+| customer_id  | points |
+| ------------- | ------------- |
+| B  | 940 |
+| A  | 1370  | 
+
+
+
+
 
